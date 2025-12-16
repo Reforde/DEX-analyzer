@@ -1,271 +1,504 @@
+"""
+Main window for DEX Analyzer (PySide6 version).
+"""
 
-import tkinter as tk
-from tkinter import ttk, messagebox
-import threading
-import time
-from datetime import datetime
+from PySide6.QtWidgets import (
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QTabWidget, QLabel, QPushButton, QToolBar, QStatusBar, QCheckBox
+)
+from PySide6.QtCore import Qt, Slot
+from PySide6.QtGui import QAction, QKeySequence
 
-from config import Config
 from database.database_manager import DatabaseManager
-from api.bitquery_client import BitqueryClient
-from services.price_fetcher import PriceFetcher
-from services.arbitrage_analyzer import ArbitrageAnalyzer
-from gui.widgets.price_table import PriceTable
+from services.token_manager import TokenManager
+from services.data_service import DataService
+from gui.theme_manager import ThemeManager
+from gui.widgets.available_tokens_table import AvailableTokensTable
+from gui.widgets.tracked_tokens_table import TrackedTokensTable
+from gui.widgets.current_prices_table import CurrentPricesTable
 from gui.widgets.arbitrage_table import ArbitrageTable
 
 
-class MainWindow:
-    """Main application window"""
-    
-    def __init__(self, root):
-        """
-        Initialize main window
-        
-        Args:
-            root: Tkinter root window
-        """
-        self.root = root
-        self.root.title(Config.WINDOW_TITLE)
-        self.root.geometry(Config.WINDOW_SIZE)
-        
-        # Initialize components
+class MainWindow(QMainWindow):
+    """
+    Main application window with tabs for different views.
+    """
+
+    def __init__(self):
+        super().__init__()
+
+        # Initialize backend services
         self.db_manager = DatabaseManager()
-        self.api_client = None
-        self.price_fetcher = None
-        self.arbitrage_analyzer = None
-        
-        # Configuration
-        self.arbitrage_threshold = Config.DEFAULT_THRESHOLD
-        self.auto_refresh = False
-        
-        # Create GUI
-        self._create_widgets()
-    
-    def _create_widgets(self):
-        """Create all GUI widgets"""
-        # Configuration frame
-        self._create_config_frame()
-        
-        # Notebook with tabs
-        notebook = ttk.Notebook(self.root)
-        notebook.pack(fill="both", expand=True, padx=10, pady=5)
-        
-        # Prices tab
-        prices_frame = ttk.Frame(notebook)
-        notebook.add(prices_frame, text="Current Prices")
-        self.price_table = PriceTable(prices_frame)
-        
-        # Arbitrage tab
-        arbitrage_frame = ttk.Frame(notebook)
-        notebook.add(arbitrage_frame, text="Arbitrage Opportunities")
-        self.arbitrage_table = ArbitrageTable(arbitrage_frame)
-    
-    def _create_config_frame(self):
-        """Create configuration frame with controls"""
-        config_frame = ttk.LabelFrame(self.root, text="Configuration", padding=10)
-        config_frame.pack(fill="x", padx=10, pady=5)
-        
-        # API Key
-        ttk.Label(config_frame, text="Bitquery API Key:").grid(
-            row=0, column=0, sticky="w", padx=5)
-        self.api_key_entry = ttk.Entry(config_frame, width=60, show="*")
-        self.api_key_entry.grid(row=0, column=1, columnspan=2, padx=5, sticky="ew")
-        
-        # Threshold
-        ttk.Label(config_frame, text="Arbitrage Threshold (%):").grid(
-            row=1, column=0, sticky="w", padx=5)
-        self.threshold_entry = ttk.Entry(config_frame, width=10)
-        self.threshold_entry.insert(0, str(Config.DEFAULT_THRESHOLD))
-        self.threshold_entry.grid(row=1, column=1, padx=5, sticky="w")
-        
-        # Buttons
-        btn_frame = ttk.Frame(config_frame)
-        btn_frame.grid(row=2, column=0, columnspan=3, pady=5)
-        
-        self.fetch_btn = ttk.Button(btn_frame, text="Fetch Prices", 
-                                    command=self._on_fetch_prices)
-        self.fetch_btn.pack(side="left", padx=5)
-        
-        ttk.Button(btn_frame, text="Test Connection", 
-                  command=self._on_test_connection).pack(side="left", padx=5)
-        
-        self.auto_refresh_btn = ttk.Button(btn_frame, text="Start Auto-Refresh",
-                                          command=self._on_toggle_auto_refresh)
-        self.auto_refresh_btn.pack(side="left", padx=5)
-        
-        ttk.Button(btn_frame, text="Clear Database",
-                  command=self._on_clear_database).pack(side="left", padx=5)
-        
-        # Status label
-        self.status_label = ttk.Label(config_frame, text="Status: Ready", 
-                                     foreground="green")
-        self.status_label.grid(row=3, column=0, columnspan=3, pady=5)
-    
-    def _initialize_services(self) -> bool:
+        self.token_manager = TokenManager(self.db_manager)
+        self.data_service = DataService()
+
+        # Initialize theme manager
+        self.theme_manager = ThemeManager(self.app_instance, self.db_manager)
+
+        # Setup UI
+        self.setup_ui()
+
+        # Apply initial theme
+        self.theme_manager.apply_theme(self.theme_manager.current_theme)
+
+        # Restore window state
+        self.restore_window_state()
+
+    def setup_ui(self):
         """
-        Initialize API client and services
-        
+        Set up the user interface.
+        """
+        # Window properties
+        self.setWindowTitle("DEX Arbitrage Monitor")
+        self.resize(1600, 1000)
+
+        # Create central widget
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+
+        # Main layout
+        main_layout = QVBoxLayout(central_widget)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        # Create top bar
+        top_bar = self.create_top_bar()
+        main_layout.addWidget(top_bar)
+
+        # Create tab widget
+        self.tab_widget = QTabWidget()
+        self.tab_widget.setTabPosition(QTabWidget.TabPosition.North)
+        main_layout.addWidget(self.tab_widget)
+
+        # Create tabs (placeholders for now)
+        self.create_tabs()
+
+        # Create toolbar
+        self.create_toolbar()
+
+        # Create status bar
+        self.create_status_bar()
+
+    def create_top_bar(self) -> QWidget:
+        """
+        Create top bar with title, status, and theme toggle.
+
         Returns:
-            True if successful, False otherwise
+            Top bar widget
         """
-        api_key = self.api_key_entry.get().strip()
-        
-        if not api_key:
-            messagebox.showerror("Error", "Please enter your Bitquery API key")
-            return False
-        
-        try:
-            threshold = float(self.threshold_entry.get())
-            self.arbitrage_threshold = threshold
-        except ValueError:
-            messagebox.showerror("Error", "Invalid threshold value")
-            return False
-        
-        # Initialize services
-        self.api_client = BitqueryClient(api_key)
-        self.price_fetcher = PriceFetcher(self.api_client)
-        self.arbitrage_analyzer = ArbitrageAnalyzer(self.db_manager, threshold)
-        
-        return True
-    
-    def _on_test_connection(self):
-        """Handle test connection button click"""
-        if not self._initialize_services():
-            return
-        
-        thread = threading.Thread(target=self._test_connection_worker, daemon=True)
-        thread.start()
-    
-    def _test_connection_worker(self):
-        """Worker thread for testing connection"""
-        self._update_status("Testing connection...", "orange")
-        
-        result = self.api_client.test_connection()
-        
-        if result["success"]:
-            self._update_status("Connection successful!", "green")
-            self.root.after(0, lambda: messagebox.showinfo(
-                "Success", "Successfully connected to Bitquery API!\n\nYou can now fetch prices."))
+        top_bar = QWidget()
+        top_bar.setObjectName("topBar")
+        top_bar.setFixedHeight(60)
+
+        layout = QHBoxLayout(top_bar)
+        layout.setContentsMargins(20, 10, 20, 10)
+
+        # Title
+        title_label = QLabel("DEX Arbitrage Monitor")
+        title_label.setStyleSheet("font-size: 18pt; font-weight: bold;")
+        layout.addWidget(title_label)
+
+        # Spacer
+        layout.addStretch()
+
+        # Status label
+        self.status_label = QLabel("Ready")
+        self.status_label.setStyleSheet("font-size: 11pt; color: #00aa66;")
+        layout.addWidget(self.status_label)
+
+        # Theme toggle button
+        self.theme_toggle_btn = QPushButton("🌙 Dark")
+        self.theme_toggle_btn.setFixedWidth(120)
+        self.theme_toggle_btn.setToolTip("Toggle between dark and light theme (Ctrl+T)")
+        self.theme_toggle_btn.clicked.connect(self.on_theme_toggle)
+        layout.addWidget(self.theme_toggle_btn)
+
+        return top_bar
+
+    def create_toolbar(self):
+        """
+        Create toolbar with action buttons.
+        """
+        toolbar = QToolBar("Main Toolbar")
+        toolbar.setMovable(False)
+        self.addToolBar(toolbar)
+
+        # Refresh action with Ctrl+R shortcut
+        refresh_action = QAction("Refresh Prices", self)
+        refresh_action.setStatusTip("Refresh current prices (Ctrl+R)")
+        refresh_action.setShortcut(QKeySequence("Ctrl+R"))
+        refresh_action.triggered.connect(self.on_refresh)
+        toolbar.addAction(refresh_action)
+
+        # Scan action with Ctrl+S shortcut
+        scan_action = QAction("Scan Arbitrage", self)
+        scan_action.setStatusTip("Scan for arbitrage opportunities (Ctrl+S)")
+        scan_action.setShortcut(QKeySequence("Ctrl+S"))
+        scan_action.triggered.connect(self.on_scan)
+        toolbar.addAction(scan_action)
+
+
+    def create_status_bar(self):
+        """
+        Create status bar at bottom of window.
+        """
+        status_bar = QStatusBar()
+        self.setStatusBar(status_bar)
+        status_bar.showMessage("Ready")
+
+    def create_tabs(self):
+        """
+        Create all tab widgets.
+        """
+        # Tab 1: Available Tokens
+        self.available_tokens_table = AvailableTokensTable(
+            self.token_manager,
+            self.theme_manager,
+            self
+        )
+        self.available_tokens_table.tokens_added.connect(self.on_tokens_added)
+        self.tab_widget.addTab(self.available_tokens_table, "Available Tokens")
+
+        # Tab 2: Tracked Tokens
+        self.tracked_tokens_table = TrackedTokensTable(
+            self.token_manager,
+            self.theme_manager,
+            self
+        )
+        self.tracked_tokens_table.threshold_updated.connect(self.on_threshold_updated)
+        self.tracked_tokens_table.token_removed.connect(self.on_token_removed)
+        self.tab_widget.addTab(self.tracked_tokens_table, "Tracked Tokens")
+
+        # Tab 3: Current Prices
+        self.current_prices_table = CurrentPricesTable(
+            self.token_manager,
+            self.data_service,
+            self.theme_manager,
+            self
+        )
+        self.tab_widget.addTab(self.current_prices_table, "Current Prices")
+
+        # Tab 4: Arbitrage Opportunities
+        self.arbitrage_table = ArbitrageTable(
+            self.token_manager,
+            self.data_service,
+            self.theme_manager,
+            self
+        )
+        self.tab_widget.addTab(self.arbitrage_table, "Arbitrage Opportunities")
+
+    @Slot()
+    def on_theme_toggle(self):
+        """
+        Handle theme toggle button click.
+        """
+        new_theme = self.theme_manager.toggle_theme()
+
+        # Update button text and icon
+        if new_theme == "dark":
+            self.theme_toggle_btn.setText("🌙 Dark")
         else:
-            self._update_status(f"Connection failed: {result['message']}", "red")
-            self.root.after(0, lambda: messagebox.showerror(
-                "Connection Failed", f"Failed to connect:\n{result['message']}"))
-    
-    def _on_fetch_prices(self):
-        """Handle fetch prices button click"""
-        if not self._initialize_services():
+            self.theme_toggle_btn.setText("☀️ Light")
+
+        # Update status
+        self.status_label.setText(f"Theme changed to {new_theme.capitalize()}")
+
+    @Slot()
+    def on_refresh(self):
+        """
+        Handle refresh action - refreshes prices on all 3 tabs with 1 API call.
+        Updates: Available Tokens, Tracked Tokens, and Current Prices tabs.
+        """
+        self.set_status("Refreshing prices...")
+
+        # Get all tokens (both available and tracked)
+        available_tokens = self.token_manager.get_available_tokens()
+        tracked_tokens_data = self.token_manager.get_tracked_tokens()
+        tracked_tokens = [t for t, _ in tracked_tokens_data]
+
+        # Combine all tokens
+        all_tokens = available_tokens + tracked_tokens
+
+        if not all_tokens:
+            self.set_status("No tokens to refresh")
             return
-        
-        thread = threading.Thread(target=self._fetch_prices_worker, daemon=True)
-        thread.start()
-    
-    def _fetch_prices_worker(self):
-        """Worker thread for fetching prices"""
-        self._update_status("Fetching prices...", "orange")
-        self.fetch_btn.config(state="disabled")
-        
+
+        # Extract symbols
+        token_symbols = [t.symbol for t in all_tokens]
+        dex_keys = ["uniswap_v3", "pancakeswap_v3", "sushiswap", "curve"]
+
+        # Bulk fetch all prices (1 API CALL!)
         try:
-            timestamp = datetime.now()
-            
-            # Fetch all prices
-            price_results = self.price_fetcher.fetch_all_prices(
-                Config.SUPPORTED_DEXES,
-                Config.SUPPORTED_TOKENS,
-                Config.BASE_CURRENCY
-            )
-            
-            # Store prices in database
-            success_count = 0
-            for dex, tokens in price_results.items():
-                for token, data in tokens.items():
-                    self.db_manager.insert_price(
-                        timestamp=timestamp,
-                        dex=dex,
-                        token=token,
-                        base_currency=Config.BASE_CURRENCY,
-                        price=data['price'],
-                        volume=data['volume']
-                    )
-                    success_count += 1
-            
-            if success_count == 0:
-                raise Exception("No data was fetched successfully.")
-            
-            # Find arbitrage opportunities
-            opportunities = self.arbitrage_analyzer.find_opportunities(
-                timestamp=timestamp,
-                tokens=Config.SUPPORTED_TOKENS,
-                dexes=Config.SUPPORTED_DEXES
-            )
-            
-            # Save opportunities
-            self.arbitrage_analyzer.save_opportunities(opportunities, timestamp)
-            
-            # Update GUI
-            self.root.after(0, self._update_displays)
-            
-            self._update_status(
-                f"Prices updated successfully ({success_count} pairs fetched)", "green")
-        
+            all_prices = self.data_service.get_bulk_prices_all_dexes(token_symbols, dex_keys)
+
+            # Update Available Tokens table
+            if hasattr(self, 'available_tokens_table'):
+                self.update_available_tokens_prices(all_prices)
+
+            # Update Tracked Tokens table
+            if hasattr(self, 'tracked_tokens_table'):
+                self.update_tracked_tokens_prices(all_prices)
+
+            # Update Current Prices table
+            if hasattr(self, 'current_prices_table'):
+                self.update_current_prices_table(all_prices)
+
+            self.set_status(f"Refreshed prices for {len(all_tokens)} tokens")
+
         except Exception as e:
-            self._update_status(f"Error: {str(e)}", "red")
-            self.root.after(0, lambda: messagebox.showerror(
-                "Error", f"Failed to fetch prices:\n{str(e)}"))
-        
-        finally:
-            self.fetch_btn.config(state="normal")
-    
-    def _update_displays(self):
-        """Update both price and arbitrage displays"""
-        self.price_table.update_display(self.db_manager.get_latest_prices())
-        self.arbitrage_table.update_display(
-            self.db_manager.get_latest_arbitrage_opportunities())
-    
-    def _on_toggle_auto_refresh(self):
-        """Handle auto-refresh toggle"""
-        self.auto_refresh = not self.auto_refresh
-        
-        if self.auto_refresh:
-            if not self._initialize_services():
-                self.auto_refresh = False
-                return
-            
-            self.auto_refresh_btn.config(text="Stop Auto-Refresh")
-            thread = threading.Thread(target=self._auto_refresh_worker, daemon=True)
-            thread.start()
-        else:
-            self.auto_refresh_btn.config(text="Start Auto-Refresh")
-    
-    def _auto_refresh_worker(self):
-        """Worker thread for auto-refresh"""
-        while self.auto_refresh:
-            self._fetch_prices_worker()
-            time.sleep(Config.AUTO_REFRESH_INTERVAL)
-    
-    def _on_clear_database(self):
-        """Handle clear database button click"""
-        response = messagebox.askyesno(
-            "Confirm", "Are you sure you want to clear all data?")
-        
-        if response:
-            self.db_manager.clear_all_data()
-            self._update_displays()
-            messagebox.showinfo("Success", "Database cleared successfully")
-    
-    def _update_status(self, message: str, color: str):
+            self.set_status(f"Error refreshing prices: {str(e)}")
+
+    def update_available_tokens_prices(self, all_prices):
         """
-        Update status label
-        
+        Update prices in Available Tokens table.
+
         Args:
-            message: Status message
-            color: Text color
+            all_prices: Dict of {symbol: {dex_key: price_data}}
         """
-        def update():
-            self.status_label.config(text=f"Status: {message}", foreground=color)
-        self.root.after(0, update)
-    
-    def on_closing(self):
-        """Handle window closing"""
-        self.auto_refresh = False
-        self.db_manager.close()
-        self.root.destroy()
+        from utils import format_price
+
+        table = self.available_tokens_table.table
+
+        for row in range(table.rowCount()):
+            symbol_item = table.item(row, 1)  # Symbol column
+            if not symbol_item:
+                continue
+
+            symbol = symbol_item.text()
+            if symbol not in all_prices:
+                continue
+
+            # Get average price across all DEXes
+            dex_prices = all_prices[symbol]
+            prices = [data.get('price_usd', 0) for data in dex_prices.values() if data.get('price_usd', 0) > 0]
+            volumes = [data.get('volume_24h', 0) for data in dex_prices.values() if data.get('volume_24h', 0) > 0]
+            liquidities = [data.get('liquidity_usd', 0) for data in dex_prices.values() if data.get('liquidity_usd', 0) > 0]
+
+            avg_price = sum(prices) / len(prices) if prices else 0
+            total_volume = sum(volumes) if volumes else 0
+            avg_liquidity = sum(liquidities) / len(liquidities) if liquidities else 0
+
+            # Update Price column (index 3)
+            price_text = format_price(avg_price) if avg_price > 0 else "$0.00"
+            price_item = table.item(row, 3)
+            if price_item:
+                price_item.setText(price_text)
+
+            # Update Volume column (index 4)
+            volume_text = f"${total_volume:,.0f}" if total_volume > 0 else "$0"
+            volume_item = table.item(row, 4)
+            if volume_item:
+                volume_item.setText(volume_text)
+
+            # Update Liquidity column (index 5)
+            liquidity_text = f"${avg_liquidity:,.0f}" if avg_liquidity > 0 else "$0"
+            liquidity_item = table.item(row, 5)
+            if liquidity_item:
+                liquidity_item.setText(liquidity_text)
+
+    def update_tracked_tokens_prices(self, all_prices):
+        """
+        Update prices in Tracked Tokens table.
+
+        Args:
+            all_prices: Dict of {symbol: {dex_key: price_data}}
+        """
+        from utils import format_price
+
+        table = self.tracked_tokens_table.table
+
+        for row in range(table.rowCount()):
+            symbol_item = table.item(row, 0)  # Symbol column
+            if not symbol_item:
+                continue
+
+            symbol = symbol_item.text()
+            if symbol not in all_prices:
+                continue
+
+            # Get data from all DEXes
+            dex_prices = all_prices[symbol]
+            prices = [data.get('price_usd', 0) for data in dex_prices.values() if data.get('price_usd', 0) > 0]
+            price_changes = [data.get('price_change_24h', 0) for data in dex_prices.values()]
+            liquidities = [data.get('liquidity_usd', 0) for data in dex_prices.values() if data.get('liquidity_usd', 0) > 0]
+
+            avg_price = sum(prices) / len(prices) if prices else 0
+            avg_change = sum(price_changes) / len(price_changes) if price_changes else 0
+            avg_liquidity = sum(liquidities) / len(liquidities) if liquidities else 0
+
+            # Update Price column (index 2)
+            price_text = format_price(avg_price) if avg_price > 0 else "$0.00"
+            price_item = table.item(row, 2)
+            if price_item:
+                price_item.setText(price_text)
+
+            # Update Volatility column (index 3) based on 24h change
+            volatility = "High" if abs(avg_change) > 5 else "Medium" if abs(avg_change) > 2 else "Low"
+            volatility_item = table.item(row, 3)
+            if volatility_item:
+                volatility_item.setText(volatility)
+
+            # Update Liquidity column (index 4)
+            liquidity_text = f"${avg_liquidity:,.0f}" if avg_liquidity > 0 else "$0"
+            liquidity_item = table.item(row, 4)
+            if liquidity_item:
+                liquidity_item.setText(liquidity_text)
+
+    def update_current_prices_table(self, all_prices):
+        """
+        Update the Current Prices table with bulk fetched data.
+
+        Args:
+            all_prices: Dict of {symbol: {dex_key: price_data}}
+        """
+        # Clear and populate the prices cache
+        self.current_prices_table.prices_cache.clear()
+
+        for symbol, dex_prices in all_prices.items():
+            self.current_prices_table.prices_cache[symbol] = {}
+            for dex_key, price_data in dex_prices.items():
+                if price_data:
+                    self.current_prices_table.prices_cache[symbol][dex_key] = price_data.get('price_usd', 0.0)
+
+        # Update the table display
+        self.current_prices_table.update_table()
+
+    @Slot()
+    def on_scan(self):
+        """
+        Handle scan action - scans for arbitrage opportunities.
+        """
+        self.set_status("Scanning for arbitrage opportunities...")
+
+        # Switch to arbitrage tab and trigger scan
+        if hasattr(self, 'arbitrage_table'):
+            self.tab_widget.setCurrentIndex(3)  # Arbitrage tab
+            self.arbitrage_table.scan_now()
+
+    @Slot(list)
+    def on_tokens_added(self, token_ids):
+        """
+        Handle tokens being added to tracking.
+
+        Args:
+            token_ids: List of token IDs that were added
+        """
+        self.set_status(f"Added {len(token_ids)} token(s) to tracking")
+
+        # Refresh available tokens table to remove added tokens
+        if hasattr(self, 'available_tokens_table'):
+            self.available_tokens_table.refresh()
+
+        # Refresh tracked tokens table if it exists
+        if hasattr(self, 'tracked_tokens_table'):
+            self.tracked_tokens_table.refresh()
+
+    @Slot(int, float, str)
+    def on_threshold_updated(self, token_id, value, mode):
+        """
+        Handle threshold being updated.
+
+        Args:
+            token_id: Token ID that was updated
+            value: New threshold value
+            mode: New threshold mode
+        """
+        mode_text = "%" if mode == "percentage" else "$"
+        self.set_status(f"Threshold updated to {value:.2f}{mode_text}")
+
+    @Slot(int)
+    def on_token_removed(self, token_id):
+        """
+        Handle token being removed from tracking.
+
+        Args:
+            token_id: Token ID that was removed
+        """
+        self.set_status("Token removed from tracking")
+
+        # Refresh available tokens table to show removed token
+        if hasattr(self, 'available_tokens_table'):
+            self.available_tokens_table.refresh()
+
+    def set_status(self, message: str):
+        """
+        Set status message in both top bar and status bar.
+
+        Args:
+            message: Status message to display
+        """
+        self.status_label.setText(message)
+        self.statusBar().showMessage(message)
+
+    def restore_window_state(self):
+        """
+        Restore window size, position, and tab selection from database.
+        """
+        try:
+            # Restore window geometry
+            width = self.db_manager.get_preference("window_width")
+            height = self.db_manager.get_preference("window_height")
+            x = self.db_manager.get_preference("window_x")
+            y = self.db_manager.get_preference("window_y")
+
+            if width and height:
+                self.resize(int(width), int(height))
+
+            if x is not None and y is not None:
+                self.move(int(x), int(y))
+
+            # Restore last active tab
+            last_tab = self.db_manager.get_preference("last_tab_index")
+            if last_tab is not None:
+                tab_index = int(last_tab)
+                if 0 <= tab_index < self.tab_widget.count():
+                    self.tab_widget.setCurrentIndex(tab_index)
+
+        except Exception as e:
+            # If restoration fails, just use defaults
+            print(f"Could not restore window state: {e}")
+
+    def save_window_state(self):
+        """
+        Save window size, position, and tab selection to database.
+        """
+        try:
+            # Save window geometry
+            self.db_manager.set_preference("window_width", str(self.width()))
+            self.db_manager.set_preference("window_height", str(self.height()))
+            self.db_manager.set_preference("window_x", str(self.x()))
+            self.db_manager.set_preference("window_y", str(self.y()))
+
+            # Save current tab
+            current_tab = self.tab_widget.currentIndex()
+            self.db_manager.set_preference("last_tab_index", str(current_tab))
+
+        except Exception as e:
+            print(f"Could not save window state: {e}")
+
+    def closeEvent(self, event):
+        """
+        Handle window close event.
+
+        Args:
+            event: Close event
+        """
+        # Save window state before closing
+        self.save_window_state()
+
+        # Clean up database connection
+        if hasattr(self, 'db_manager'):
+            self.db_manager.close()
+
+        event.accept()
+
+    @property
+    def app_instance(self):
+        """
+        Get QApplication instance.
+
+        Returns:
+            QApplication instance
+        """
+        from PySide6.QtWidgets import QApplication
+        return QApplication.instance()

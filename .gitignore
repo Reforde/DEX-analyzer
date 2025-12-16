@@ -1,6 +1,32 @@
+# Virtual environment
 .venv/
+venv/
+
+# Python cache
 __pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Build artifacts
 build/
 dist/
-main.spec
+*.spec
+
+# Database files
 *.db
+*.sqlite
+*.sqlite3
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
