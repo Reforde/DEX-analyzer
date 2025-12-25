@@ -14,8 +14,9 @@ DEX Arbitrage Monitor - це потужний інструмент для мон
 
 ## Технології
 
-- **API**: CoinGecko Free API 
+- **API**: CoinGecko Free API (10-30 запитів/хвилину)
 - **Кеш**: 30-секундний TTL для оптимізації запитів
+- **Rate Limiting**: Автоматична затримка 1.5с між запитами
 - **Симуляція DEX**: Генерація варіацій цін (±0.1-2%) для різних бірж
 - **GUI**: PySide6 з підтримкою темної/світлої тем
 - **База даних**: SQLite для зберігання токенів та налаштувань
@@ -104,10 +105,10 @@ DEX-analyzer/
 
 ```bash
 # Тест CoinGecko API
-python tests/test_coingecko.py
+python -m tests.test_coingecko
 
 # Інтеграційні тести
-python tests/test_integration.py
+python -m tests.test_integration
 ```
 
 ## Конфігурація

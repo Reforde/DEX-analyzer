@@ -4,6 +4,7 @@ Provides real cryptocurrency prices from CoinGecko (free tier)
 """
 
 import requests
+import time
 from typing import Optional, Dict
 from datetime import datetime
 from config import Config
@@ -60,6 +61,7 @@ class CoinGeckoProvider:
         """Initialize CoinGecko provider"""
         self.base_url = "https://api.coingecko.com/api/v3"
         self.timeout = 10  # seconds
+        self.rate_limit_delay = 1.5  # seconds between requests to avoid 429 errors
 
     def get_token_price(self, token_symbol: str) -> Optional[Dict]:
         """
@@ -111,6 +113,10 @@ class CoinGeckoProvider:
                         "source": "coingecko"
                     }
 
+            elif response.status_code == 429:
+                print(f"CoinGecko rate limit exceeded. Waiting {self.rate_limit_delay * 2}s...")
+                time.sleep(self.rate_limit_delay * 2)
+                return None
             else:
                 print(f"CoinGecko API error: {response.status_code}")
                 return None
@@ -118,6 +124,9 @@ class CoinGeckoProvider:
         except Exception as e:
             print(f"Error fetching price from CoinGecko: {str(e)}")
             return None
+        finally:
+            # Add delay to avoid rate limiting
+            time.sleep(self.rate_limit_delay)
 
     def get_multiple_prices(self, token_symbols: list) -> Dict[str, Optional[Dict]]:
         """
@@ -178,6 +187,10 @@ class CoinGeckoProvider:
 
                 return result
 
+            elif response.status_code == 429:
+                print(f"CoinGecko rate limit exceeded. Waiting {self.rate_limit_delay * 2}s...")
+                time.sleep(self.rate_limit_delay * 2)
+                return {}
             else:
                 print(f"CoinGecko API error: {response.status_code}")
                 return {}
@@ -185,3 +198,6 @@ class CoinGeckoProvider:
         except Exception as e:
             print(f"Error fetching prices from CoinGecko: {str(e)}")
             return {}
+        finally:
+            # Add delay to avoid rate limiting
+            time.sleep(self.rate_limit_delay)
