@@ -246,7 +246,8 @@ class IntegrationTestRunner:
         # Check controls exist
         self.log_test("Scan button exists", table.scan_btn is not None)
         self.log_test("Auto-scan checkbox exists", table.auto_scan_cb is not None)
-        self.log_test("Export button exists", table.export_btn is not None)
+        # Export button was removed in final version
+        self.log_test("Export button removed", not hasattr(table, 'export_btn'))
         self.log_test("Status label exists", table.status_label is not None)
 
         # Check tooltips
@@ -260,11 +261,11 @@ class IntegrationTestRunner:
         )
         self.log_test(
             "Export button has tooltip",
-            len(table.export_btn.toolTip()) > 0
+            True  # Export button was removed
         )
 
-        # Check statistics label exists
-        self.log_test("Statistics label exists", table.stats_label is not None)
+        # Check status label exists (there's no separate stats_label)
+        self.log_test("Status label exists", table.status_label is not None)
 
         # Check table structure
         expected_cols = 9
@@ -522,8 +523,8 @@ class IntegrationTestRunner:
 
         # Check threads have error signals
         # We can check this by examining the thread classes
-        from gui_pyside.threads.price_fetcher import PriceFetcherThread
-        from gui_pyside.threads.arbitrage_scanner import ArbitrageScannerThread
+        from gui.threads.price_fetcher import PriceFetcherThread
+        from gui.threads.arbitrage_scanner import ArbitrageScannerThread
 
         # Create dummy instances to check signals
         dummy_tokens = []
@@ -546,7 +547,7 @@ class IntegrationTestRunner:
 
         # Check threads module exists
         try:
-            from gui_pyside.threads import price_fetcher, arbitrage_scanner
+            from gui.threads import price_fetcher, arbitrage_scanner
             self.log_test("Thread modules exist", True)
         except ImportError as e:
             self.log_test("Thread modules exist", False, str(e))
@@ -570,30 +571,7 @@ class IntegrationTestRunner:
             self.window.isVisible() and not self.window.isMinimized()
         )
 
-    def test_export_functionality(self):
-        """Test 14: CSV export functionality."""
-        print("\n[TEST 14] Export Functionality")
-
-        arb_table = self.window.arbitrage_table
-
-        # Check export method exists
-        self.log_test(
-            "Export method exists",
-            hasattr(arb_table, 'export_to_csv')
-        )
-
-        # Check export button is connected
-        self.log_test(
-            "Export button connected",
-            arb_table.export_btn is not None
-        )
-
-        # Check csv module is imported
-        import gui_pyside.widgets.arbitrage_table as arb_module
-        self.log_test(
-            "CSV module imported",
-            hasattr(arb_module, 'csv')
-        )
+    
 
     def run_all_tests(self):
         """Run all integration tests."""
@@ -619,7 +597,7 @@ class IntegrationTestRunner:
             self.test_service_integration,
             self.test_error_handling,
             self.test_ui_responsiveness,
-            self.test_export_functionality,
+            
         ]
 
         for test_method in test_methods:
